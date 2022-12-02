@@ -1,5 +1,7 @@
 ## スパムフィルタ Akismet プラグイン  
 
+https://oncologynote.com/?f39dac16f2
+
 ## 概要
 
 WordPress用スパム対策プラグインとして開発されており、多数のWordPress利用者から「最強」との呼び声が高いプラグイン「Akismet」を PukiWiki で利用します。
