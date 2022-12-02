@@ -2,26 +2,19 @@
 /**
  *  Akismet Spamfilter Plugin
  *
- *  @author     sonots
- *  @license    http://www.gnu.org/licenses/gpl.html GPL v2
- *  @link       http://lsx.sourceforge.jp/?Plugin%2Fakismet.inc.php
- *  @version    $Id: akismet.inc.php, v 1.13 2008-07-26 13:06:36Z sonots $
+ *  @orinigal author     sonots
+ *  @license    https://www.gnu.org/licenses/gpl.html GPL v2
+ *  @link       https://github.com/m0370/pukiwiki_akismet.inc.php
+ *  @version    $Id: akismet.inc.php, v2 2022-12-02 m0370
  *  @package    plugin
  */
-
-//error_reporting(E_ALL);
-if (defined('INIT_DIR') & file_exists(INIT_DIR . 'akismet.ini.php')) { // Plus!
-    include_once(INIT_DIR . 'akismet.ini.php');
-} elseif (file_exists(DATA_HOME . 'init/akismet.ini.php')) { // Official
-    include_once(DATA_HOME . 'init/akismet.ini.php');
-}
 
 // Initial settings
 if (! defined('PLUGIN_AKISMET_API_KEY')) {
     define('PLUGIN_AKISMET_API_KEY', '');
 }
 if (! defined('PLUGIN_AKISMET_RECAPTCHA_PUBLIC_KEY')) {
-    define('PLUGIN_AKISMET_RECAPTCHA_PUBLIC_KEY', '');
+    define('PLUGIN_AKISMET_RECAPTCHA_PUBLIC_KEY', ''); //Google reCaptcha v2
 }
 if (! defined('PLUGIN_AKISMET_RECAPTCHA_PRIVATE_KEY')) {
     define('PLUGIN_AKISMET_RECAPTCHA_PRIVATE_KEY', '');
@@ -44,10 +37,6 @@ if (! defined('PLUGIN_AKISMET_KEEPLOG')) {
 if (! isset($GLOBALS['PLUGIN_AKISMET_TABLE_ORDER'])) {
     $GLOBALS['PLUGIN_AKISMET_TABLE_ORDER'] =  array('time', 'cmd', 'page', 'ip', 'host', 'agent', 'body');
 }
-if (! defined('PLUGIN_AKISMET_SORTABLETABLE_URL')) {
-    define('PLUGIN_AKISMET_SORTABLETABLE_URL', 
-           (defined('SKIN_URI') ? SKIN_URI : SKIN_DIR) . 'sortabletable.js'); // SKIN_URI (Plus!)
-}
 
 // Set FALSE to use recaptcha without akismet (no log will be taken with FALSE)
 if (! defined('PLUGIN_AKISMET_USE_AKISMET')) {
@@ -59,12 +48,12 @@ if (! defined('PLUGIN_AKISMET_USE_RECAPTCHA')) {
 }
 // Do not spam filter POST via these plugins (SPAM filter works only for POST, not GET)
 if (! defined('PLUGIN_AKISMET_IGNORE_PLUGINS')) {
-    define('PLUGIN_AKISMET_IGNORE_PLUGINS', 'read,vote,vote2');
+    define('PLUGIN_AKISMET_IGNORE_PLUGINS', 'read,vote,vote2,timestamp');
 }
 
 // Do not require to captcha if the user is known as human
 if (! defined('PLUGIN_AKISMET_THROUGH_IF_ADMIN')) { // Plus!
-    define('PLUGIN_AKISMET_THROUGH_IF_ADMIN', TRUE);
+    define('PLUGIN_AKISMET_THROUGH_IF_ADMIN', FALSE);
 }
 if (! defined('PLUGIN_AKISMET_THROUGH_IF_ENROLLEE')) { // Plus!
     define('PLUGIN_AKISMET_THROUGH_IF_ENROLLEE', FALSE);
@@ -182,8 +171,6 @@ class PluginAkismet
         foreach ($GLOBALS['PLUGIN_AKISMET_TABLE_ORDER'] as $key) {
             $sorts[] = $sort_types[$key];
         }
-        global $head_tags;
-        $head_tags[] = ' <script type="text/javascript" charset="utf-8" src="' . PLUGIN_AKISMET_SORTABLETABLE_URL . '"></script>';
         $ret .= '<script type="text/javascript">' . "\n";
         $ret .= '<!-- <![CDATA[' . "\n";
         $ret .= 'var st = new SortableTable(document.getElementById("' . $table_id . '"),["' . implode('","',$sorts) . '"]);' . "\n";
@@ -199,13 +186,18 @@ class PluginAkismet
         $error = NULL;
         if (PLUGIN_AKISMET_USE_RECAPTCHA) {
             // was there a reCAPTCHA response?
-            if (isset($post["recaptcha_response_field"])) {
-                $resp = recaptcha_check_answer (PLUGIN_AKISMET_RECAPTCHA_PRIVATE_KEY,
-                                                $_SERVER["REMOTE_ADDR"],
-                                                $post["recaptcha_challenge_field"],
-                                                $post["recaptcha_response_field"]);
-                $error = $resp->error;
-                $captcha_valid = $resp->is_valid;
+            if (isset($_POST["g-recaptcha-response"])) {
+                $captcha = $_POST['g-recaptcha-response'];
+                $url='https://www.google.com/recaptcha/api/siteverify?secret=' . PLUGIN_AKISMET_RECAPTCHA_PRIVATE_KEY . '&response=' . $captcha ;
+                $ch = curl_init();
+                curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+                curl_setopt( $ch, CURLOPT_URL, $url );
+                curl_setopt( $ch, CURLOPT_RETURNTRANSFER, true );
+                $result = curl_exec( $ch );
+                curl_close($ch);
+                $captcha_result = json_decode($result,true);
+
+                $captcha_valid = $captcha_result["success"];
             // If no response from reCAPTCHA, Assume as valid. 
             } else {
                 $captcha_valid = TRUE;
@@ -368,13 +360,9 @@ class PluginAkismet
         $form = '';
         $form .= '<form action="' . get_script_uri() . '" method="post">' . "\n";
         $form .= '<div>' . "\n";
-        if (PLUGIN_AKISMET_USE_AKISMET) {
-            $form .= ' 投稿はスパムと判断されました。スパム取り消し報告を行うには以下の２つの単語をタイプしてください。' . "\n";
-        } else {
-            $form .= ' キャプチャ認証を行います。以下の２つの単語をタイプしてください。' . "\n";
-        }
+        $form .= ' 認証を行います。' . "\n";
         if (PLUGIN_AKISMET_USE_RECAPTCHA) {
-            $form .= recaptcha_get_html(PLUGIN_AKISMET_RECAPTCHA_PUBLIC_KEY, $error);
+            $form .= recaptcha_get_html(PLUGIN_AKISMET_RECAPTCHA_PUBLIC_KEY);
         } else {
             if (isset($error)) {
                 $form .= '<p>';
@@ -623,13 +611,13 @@ function plugin_akismet_write_before()
 /*
  * This is a PHP library that handles calling reCAPTCHA.
  *    - Documentation and latest version
- *          http://recaptcha.net/plugins/php/
+ *          https://recaptcha.net/plugins/php/
  *    - Get a reCAPTCHA API Key
- *          http://recaptcha.net/api/getkey
+ *          https://recaptcha.net/api/getkey
  *    - Discussion group
- *          http://groups.google.com/group/recaptcha
+ *          https://groups.google.com/group/recaptcha
  *
- * Copyright (c) 2007 reCAPTCHA -- http://recaptcha.net
+ * Copyright (c) 2007 reCAPTCHA -- https://recaptcha.net
  * AUTHORS:
  *   Mike Crawford
  *   Ben Maurer
@@ -656,9 +644,9 @@ function plugin_akismet_write_before()
 /**
  * The reCAPTCHA server URL's
  */
-define("RECAPTCHA_API_SERVER", "http://api.recaptcha.net");
-define("RECAPTCHA_API_SECURE_SERVER", "https://api-secure.recaptcha.net");
-define("RECAPTCHA_VERIFY_SERVER", "api-verify.recaptcha.net");
+define("RECAPTCHA_API_SERVER", "http://www.google.com/recaptcha/api");
+define("RECAPTCHA_API_SECURE_SERVER", "https://www.google.com/recaptcha/api");
+define("RECAPTCHA_VERIFY_SERVER", "www.google.com");
 
 /**
  * Encodes the given data into a query string format
@@ -724,29 +712,12 @@ function _recaptcha_http_post($host, $path, $data, $port = 80) {
 
  * @return string - The HTML to be embedded in the user's form.
  */
-function recaptcha_get_html ($pubkey, $error = null, $use_ssl = false)
+function recaptcha_get_html ($pubkey)
 {
 	if ($pubkey == null || $pubkey == '') {
-		die ("To use reCAPTCHA you must get an API key from <a href='http://recaptcha.net/api/getkey'>http://recaptcha.net/api/getkey</a>");
+		die ("To use reCAPTCHA you must get an API key.");
 	}
-	
-	if ($use_ssl) {
-                $server = RECAPTCHA_API_SECURE_SERVER;
-        } else {
-                $server = RECAPTCHA_API_SERVER;
-        }
-
-        $errorpart = "";
-        if ($error) {
-           $errorpart = "&amp;error=" . $error;
-        }
-        return '<script type="text/javascript" src="'. $server . '/challenge?k=' . $pubkey . $errorpart . '"></script>
-
-	<noscript>
-  		<iframe src="'. $server . '/noscript?k=' . $pubkey . $errorpart . '" height="300" width="500" frameborder="0"></iframe><br/>
-  		<textarea name="recaptcha_challenge_field" rows="3" cols="40"></textarea>
-  		<input type="hidden" name="recaptcha_response_field" value="manual_challenge"/>
-	</noscript>';
+    return '<div class="g-recaptcha" data-sitekey="' . $pubkey . '"></div>';
 }
 
 
@@ -773,7 +744,7 @@ class ReCaptchaResponse {
 function recaptcha_check_answer ($privkey, $remoteip, $challenge, $response, $extra_params = array())
 {
 	if ($privkey == null || $privkey == '') {
-		die ("To use reCAPTCHA you must get an API key from <a href='http://recaptcha.net/api/getkey'>http://recaptcha.net/api/getkey</a>");
+		die ("To use reCAPTCHA you must get an API key.");
 	}
 
 	if ($remoteip == null || $remoteip == '') {
@@ -813,16 +784,6 @@ function recaptcha_check_answer ($privkey, $remoteip, $challenge, $response, $ex
 
 }
 
-/**
- * gets a URL where the user can sign up for reCAPTCHA. If your application
- * has a configuration page where you enter a key, you should provide a link
- * using this function.
- * @param string $domain The domain where the page is hosted
- * @param string $appname The name of your application
- */
-function recaptcha_get_signup_url ($domain = null, $appname = null) {
-	return "http://recaptcha.net/api/getkey?" .  _recaptcha_qsencode (array ('domain' => $domain, 'app' => $appname));
-}
 
 function _recaptcha_aes_pad($val) {
 	$block_size = 16;
@@ -851,14 +812,14 @@ function _recaptcha_mailhide_urlbase64 ($x) {
 function recaptcha_mailhide_url($pubkey, $privkey, $email) {
 	if ($pubkey == '' || $pubkey == null || $privkey == "" || $privkey == null) {
 		die ("To use reCAPTCHA Mailhide, you have to sign up for a public and private key, " .
-		     "you can do so at <a href='http://mailhide.recaptcha.net/apikey'>http://mailhide.recaptcha.net/apikey</a>");
+		     "you can do so at <a href='https://mailhide.recaptcha.net/apikey'>https://mailhide.recaptcha.net/apikey</a>");
 	}
 	
 
 	$ky = pack('H*', $privkey);
 	$cryptmail = _recaptcha_aes_encrypt ($email, $ky);
 	
-	return "http://mailhide.recaptcha.net/d?k=" . $pubkey . "&c=" . _recaptcha_mailhide_urlbase64 ($cryptmail);
+	return "https://mailhide.recaptcha.net/d?k=" . $pubkey . "&c=" . _recaptcha_mailhide_urlbase64 ($cryptmail);
 }
 
 /**
@@ -883,7 +844,7 @@ function _recaptcha_mailhide_email_parts ($email) {
  * Gets html to display an email address given a public an private key.
  * to get a key, go to:
  *
- * http://mailhide.recaptcha.net/apikey
+ * https://mailhide.recaptcha.net/apikey
  */
 function recaptcha_mailhide_html($pubkey, $privkey, $email) {
 	$emailparts = _recaptcha_mailhide_email_parts ($email);
@@ -905,12 +866,12 @@ function recaptcha_mailhide_html($pubkey, $privkey, $email) {
  *    $comment = array(
  *           'author'    => 'viagra-test-123',
  *           'email'     => 'test@example.com',
- *           'website'   => 'http://www.example.com/',
+ *           'website'   => 'https://www.example.com/',
  *           'body'      => 'This is a test comment',
- *           'permalink' => 'http://yourdomain.com/yourblogpost.url',
+ *           'permalink' => 'https://yourdomain.com/yourblogpost.url',
  *        );
  *
- *    $akismet = new Akismet('http://www.yourdomain.com/', 'YOUR_WORDPRESS_API_KEY', $comment);
+ *    $akismet = new Akismet('https://www.yourdomain.com/', 'YOUR_WORDPRESS_API_KEY', $comment);
  *
  *    if($akismet->isError()) {
  *        echo"Couldn't connected to Akismet server!";
@@ -924,9 +885,9 @@ function recaptcha_mailhide_html($pubkey, $privkey, $email) {
  * </code>
  * 
  * @author Bret Kuhns {@link www.miphp.net}
- * @link http://www.miphp.net/blog/view/php4_akismet_class/
+ * @link https://www.miphp.net/blog/view/php4_akismet_class/
  * @version 0.3.3
- * @license http://www.opensource.org/licenses/mit-license.php MIT License
+ * @license https://www.opensource.org/licenses/mit-license.php MIT License
  */
 
 
