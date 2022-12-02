@@ -10,6 +10,8 @@ WordPress用スパム対策プラグインとして開発されており、多�
 
 sonotsさんが作成されたプラグインですが、すでに作成から10年以上経過してakismet.netは廃止されプラグインが動作しなくなっていたので、これをGoogle recaptcha v2で動作するように改造したものを置いておきます。あくまでGoogle recaptcha v2で強制的に動くように改変したものなので、詳細なバグの確認などはできていません。
 
+PHP8には未対応です。PHP7.4に対応しています。
+
 - オリジナル
   [sonots' pukiwiki プラグイン](http://pukiwiki.sonots.com/)
 - Internet Archive
