@@ -5,19 +5,19 @@
  *  @orinigal author     sonots
  *  @license    https://www.gnu.org/licenses/gpl.html GPL v2
  *  @link       https://github.com/m0370/pukiwiki_akismet.inc.php
- *  @version    $Id: akismet.inc.php, v2.0.1 2022-12-03 m0370
+ *  @version    $Id: akismet.inc.php, v2.0.2 2022-12-03 m0370
  *  @package    plugin
  */
 
 // Initial settings
 if (! defined('PLUGIN_AKISMET_API_KEY')) {
-    define('PLUGIN_AKISMET_API_KEY', '');
+    define('PLUGIN_AKISMET_API_KEY', ''); // AKISMET API key
 }
 if (! defined('PLUGIN_AKISMET_RECAPTCHA_PUBLIC_KEY')) {
-    define('PLUGIN_AKISMET_RECAPTCHA_PUBLIC_KEY', ''); //Google reCaptcha v2
+    define('PLUGIN_AKISMET_RECAPTCHA_PUBLIC_KEY', ''); //Google reCaptcha v2 API  (site key)
 }
 if (! defined('PLUGIN_AKISMET_RECAPTCHA_PRIVATE_KEY')) {
-    define('PLUGIN_AKISMET_RECAPTCHA_PRIVATE_KEY', '');
+    define('PLUGIN_AKISMET_RECAPTCHA_PRIVATE_KEY', ''); //Google reCaptcha v2 API (secret key)
 }
 
 // log settings
@@ -355,7 +355,7 @@ class PluginAkismet
     }
 
     // static
-    function get_captcha_form(&$vars, &$comment, $error = null)
+    static function get_captcha_form(&$vars, &$comment, $error = null)
     {
         $form = '';
         $form .= '<form action="' . get_script_uri() . '" method="post">' . "\n";
@@ -384,7 +384,7 @@ class PluginAkismet
     }
 
     // static
-    function spamlog_write($vars, $comment = array(), $filename = '')
+    static function spamlog_write($vars, $comment = array(), $filename = '')
     {
         if ($filename === '') $filename = PLUGIN_AKISMET_SPAMLOG_FILENAME;
 
@@ -993,7 +993,7 @@ class AkismetHttpClient extends AkismetObject {
     function getResponse($request, $path, $type = "post", $responseLength = 1160) {
         $this->_connect();
         
-        if($this->con && !$this->isError(SERVER_NOT_FOUND)) {
+        if($this->con && !$this->isError('SERVER_NOT_FOUND')) {
             $request  = 
                 strToUpper($type)." /{$this->akismetVersion}/$path HTTP/1.0\r\n" .
                 "Host: ".((!empty($this->apiKey)) ? $this->apiKey."." : null)."{$this->host}\r\n" .
