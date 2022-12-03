@@ -5,7 +5,7 @@
  *  @orinigal author     sonots
  *  @license    https://www.gnu.org/licenses/gpl.html GPL v2
  *  @link       https://github.com/m0370/pukiwiki_akismet.inc.php
- *  @version    $Id: akismet.inc.php, v2 2022-12-02 m0370
+ *  @version    $Id: akismet.inc.php, v2.0.1 2022-12-03 m0370
  *  @package    plugin
  */
 
@@ -186,7 +186,7 @@ class PluginAkismet
         $error = NULL;
         if (PLUGIN_AKISMET_USE_RECAPTCHA) {
             // was there a reCAPTCHA response?
-            if (isset($_POST["g-recaptcha-response"])) {
+            if (isset($_POST['g-recaptcha-response'])) {
                 $captcha = $_POST['g-recaptcha-response'];
                 $url='https://www.google.com/recaptcha/api/siteverify?secret=' . PLUGIN_AKISMET_RECAPTCHA_PRIVATE_KEY . '&response=' . $captcha ;
                 $ch = curl_init();
@@ -280,7 +280,7 @@ class PluginAkismet
     }
 
     // static
-    function spamfilter($comment = null)
+    static function spamfilter($comment = null)
     {
         global $vars, $defaultpage;
         // Through if GET (Check only POST)
@@ -981,7 +981,7 @@ class AkismetHttpClient extends AkismetObject {
     
     
     // Constructor
-    function AkismetHttpClient($host, $blogUrl, $apiKey, $port = 80) {
+    function __construct($host, $blogUrl, $apiKey, $port = 80) {
         $this->host = $host;
         $this->port = $port;
         $this->blogUrl = $blogUrl;
@@ -1078,7 +1078,7 @@ class Akismet extends AkismetObject {
      * @param     String    $apiKey        Your wordpress API key
      * @param     String[]    $comment    A formatted comment array to be examined by the Akismet service
      */
-    function Akismet($blogUrl, $apiKey, $comment) {
+    function __construct($blogUrl, $apiKey, $comment) {
         $this->blogUrl = $blogUrl;
         $this->apiKey  = $apiKey;
         
