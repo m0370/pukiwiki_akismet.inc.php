@@ -78,7 +78,7 @@ akismet.inc.php 内で設定をしておきます。
 
 ### PukiWiki本体修正  
 
-lib/pukiwiki.php
+#### lib/pukiwiki.php
 
 以下のような箇所に + が付いている行を追加します。
 
@@ -97,9 +97,19 @@ lib/pukiwiki.php
 +}
 ```
 
-Akismet スパムフィルタを利用するので、PukiWiki 1.4.8 以上で導入を予定されていたデフォルトのスパムフィルタ機能はオフにすることを推奨する。もしこの行がpukiwiki.ini.phpに無ければ無視して可。
+#### recaptcha.jsの読み込み
 
-pukiwiki.ini.php
+本体のスキンで下記の行を読み込んでおきます。このjsで認証画像や「ロボットではありません」のボタンを表示します。
+
+```
+
+<script src="https://www.google.com/recaptcha/api.js" defer></script>
+
+```
+
+#### pukiwiki.ini.php
+
+Akismet スパムフィルタを利用するので、PukiWiki 1.4.8 以上で導入を予定されていたデフォルトのスパムフィルタ機能はオフにすることを推奨する。もしこの行がpukiwiki.ini.phpに無ければ無視して可。
 
 ```
 -$spam = 1;      // 1 = On
