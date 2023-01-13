@@ -1,6 +1,6 @@
 ## スパムフィルタ Akismet プラグイン  
 
-https://oncologynote.com/?f39dac16f2
+https://oncologynote.jp/?f39dac16f2
 
 ## 概要
 
