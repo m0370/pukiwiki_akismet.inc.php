@@ -5,19 +5,19 @@
  *  @orinigal author     sonots
  *  @license    https://www.gnu.org/licenses/gpl.html GPL v2
  *  @link       https://github.com/m0370/pukiwiki_akismet.inc.php
- *  @version    $Id: akismet.inc.php, v2.0.2 2022-12-03 m0370
+ *  @version    $Id: akismet.inc.php, v2.0.3 2024-03-30 m0370
  *  @package    plugin
  */
 
 // Initial settings
 if (! defined('PLUGIN_AKISMET_API_KEY')) {
-    define('PLUGIN_AKISMET_API_KEY', ''); // AKISMET API key
+    define('PLUGIN_AKISMET_API_KEY', ''); // insert AKISMET API key
 }
 if (! defined('PLUGIN_AKISMET_RECAPTCHA_PUBLIC_KEY')) {
-    define('PLUGIN_AKISMET_RECAPTCHA_PUBLIC_KEY', ''); //Google reCaptcha v2 API  (site key)
+    define('PLUGIN_AKISMET_RECAPTCHA_PUBLIC_KEY', ''); // insert Google reCaptcha v2 API  (site key)
 }
 if (! defined('PLUGIN_AKISMET_RECAPTCHA_PRIVATE_KEY')) {
-    define('PLUGIN_AKISMET_RECAPTCHA_PRIVATE_KEY', ''); //Google reCaptcha v2 API (secret key)
+    define('PLUGIN_AKISMET_RECAPTCHA_PRIVATE_KEY', ''); // insert Google reCaptcha v2 API (secret key)
 }
 
 // log settings
@@ -358,6 +358,7 @@ class PluginAkismet
     static function get_captcha_form(&$vars, &$comment, $error = null)
     {
         $form = '';
+        $form .= '<script src="https://www.google.com/recaptcha/api.js" defer></script><!-- Google reCAPTCHA v2 -->' . "\n";
         $form .= '<form action="' . get_script_uri() . '" method="post">' . "\n";
         $form .= '<div>' . "\n";
         $form .= ' 認証を行います。' . "\n";
