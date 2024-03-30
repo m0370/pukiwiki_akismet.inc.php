@@ -99,12 +99,12 @@ akismet.inc.php 内で設定をしておきます。
 
 #### recaptcha.jsの読み込み
 
-~~本体のスキンで下記の行を読み込んでおきます。このjsで認証画像や「ロボットではありません」のボタンを表示します。~~
+~~本体のスキンで下記の行を読み込んでおきます。このjsで認証画像や「ロボットではありません」のボタンを表示します。~~  
 ver2.0.3からはスキンでapi.jsを呼び出さなくてもakismet.inc.php内で呼び出せるようになったので、スキンにapi.jsを呼び出す行を埋め込む必要はなくなりました。
 
 ```
 
-~~<script src="https://www.google.com/recaptcha/api.js" defer></script>~~
+<script src="https://www.google.com/recaptcha/api.js" defer></script>
 
 ```
 
