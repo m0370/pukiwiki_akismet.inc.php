@@ -5,7 +5,7 @@
  *  @orinigal author     sonots
  *  @license    https://www.gnu.org/licenses/gpl.html GPL v2
  *  @link       https://github.com/m0370/pukiwiki_akismet.inc.php
- *  @version    $Id: akismet.inc.php, v2.0.3 2024-03-30 m0370
+ *  @version    $Id: akismet.inc.php, v2.1.0 2026-06-13 m0370
  *  @package    plugin
  */
 
@@ -69,6 +69,14 @@ if (! defined('PLUGIN_AKISMET_AUTOPOST_AFTER_SUBMITHAM')) {
 if (! defined('PLUGIN_AKISMET_RECAPTCHA_LOG')) {
     define('PLUGIN_AKISMET_RECAPTCHA_LOG', FALSE);
 }
+// Reverse DNS lookup on spamlog (may slow down under spam flood, default FALSE)
+if (! defined('PLUGIN_AKISMET_LOG_REVERSE_DNS')) {
+    define('PLUGIN_AKISMET_LOG_REVERSE_DNS', FALSE);
+}
+// Restrict spamlog view (?cmd=akismet) to admin (logs contain visitor IPs/UAs)
+if (! defined('PLUGIN_AKISMET_SPAMLOG_ADMIN_ONLY')) {
+    define('PLUGIN_AKISMET_SPAMLOG_ADMIN_ONLY', TRUE);
+}
 
 class PluginAkismet
 {
@@ -78,11 +86,28 @@ class PluginAkismet
         if (isset($vars['submitHam'])) {
             return $this->submitham_action();
         } else {
-            $logfile = isset($vars['logfile']) ? $vars['logfile'] : PLUGIN_AKISMET_SPAMLOG_FILENAME;
+            // v2.1.0: spam logs contain visitor IPs/UAs, so restrict to admin by default
+            if (PLUGIN_AKISMET_SPAMLOG_ADMIN_ONLY && ! is_admin(NULL, PLUGIN_AKISMET_USE_SESSION, TRUE)) {
+                die_message('akismet : スパムログの閲覧は管理者のみ許可されています (PLUGIN_AKISMET_SPAMLOG_ADMIN_ONLY)。');
+            }
+            // v2.1.0: only the spamlog and its rotated copies may be specified
+            $logfile = isset($vars['logfile']) ? PluginAkismet::resolve_logfile($vars['logfile']) : PLUGIN_AKISMET_SPAMLOG_FILENAME;
             $body = $this->show_logfile_listbox($logfile);
             $body .= $this->show_spamlog($logfile);
             return array('msg'=>_('Spam Log'), 'body'=>$body);
         }
+    }
+
+    // static
+    // v2.1.0: whitelist for the logfile request parameter
+    // (an arbitrary path would allow reading any file on the server)
+    static function resolve_logfile($logfile)
+    {
+        $allowed = array(PLUGIN_AKISMET_SPAMLOG_FILENAME);
+        for ($i = 1; $i <= PLUGIN_AKISMET_KEEPLOG; $i++) {
+            $allowed[] = PLUGIN_AKISMET_SPAMLOG_FILENAME . '.' . $i;
+        }
+        return in_array($logfile, $allowed, true) ? $logfile : PLUGIN_AKISMET_SPAMLOG_FILENAME;
     }
     
     function show_logfile_listbox($current = PLUGIN_AKISMET_SPAMLOG_FILENAME)
@@ -134,8 +159,8 @@ class PluginAkismet
         $table_id = 'akismet_spamlog';
         $ret = '';
 
-        if (($lines = file($logfile)) === FALSE) {
-            $ret = '<div>The log file, ' . $logfile . ' , does not exist.</div>';
+        if (($lines = @file($logfile)) === FALSE) {
+            $ret = '<div>The log file, ' . htmlspecialchars($logfile) . ' , does not exist.</div>';
             return $ret;
         }
         $logdate = rtrim(array_shift($lines));
@@ -184,30 +209,39 @@ class PluginAkismet
         global $vars, $post, $get;
 
         $error = NULL;
+        $captcha_valid = TRUE;
         if (PLUGIN_AKISMET_USE_RECAPTCHA) {
             // was there a reCAPTCHA response?
             if (isset($_POST['g-recaptcha-response'])) {
+                if (! function_exists('curl_init')) {
+                    die_message('akismet : PHP の curl 拡張が必要です (reCAPTCHA の検証に使用します)。');
+                }
                 $captcha = $_POST['g-recaptcha-response'];
                 $url='https://www.google.com/recaptcha/api/siteverify?secret=' . PLUGIN_AKISMET_RECAPTCHA_PRIVATE_KEY . '&response=' . $captcha ;
                 $ch = curl_init();
-                curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
                 curl_setopt( $ch, CURLOPT_URL, $url );
                 curl_setopt( $ch, CURLOPT_RETURNTRANSFER, true );
+                curl_setopt( $ch, CURLOPT_TIMEOUT, 10 );
                 $result = curl_exec( $ch );
                 curl_close($ch);
                 $captcha_result = json_decode($result,true);
 
-                $captcha_valid = $captcha_result["success"];
-            // If no response from reCAPTCHA, Assume as valid. 
+                $captcha_valid = ! empty($captcha_result["success"]);
+            // v2.1.0: a missing token is NOT valid. Assuming valid here allowed
+            // bypassing the captcha by POSTing cmd=akismet&submitHam=1 directly.
+            // The captcha form is shown again, so the input is kept.
             } else {
-                $captcha_valid = TRUE;
-                if (PLUGIN_AKISMET_RECAPTCHA_LOG) PluginAkismet::spamlog_write($vars, array('body'=>'reCaptcha invalid'), LOG_DIR . 'captchalog.txt');
+                $captcha_valid = FALSE;
+                if (PLUGIN_AKISMET_RECAPTCHA_LOG) PluginAkismet::spamlog_write($vars, array('body'=>'reCaptcha no token'), (defined('LOG_DIR') ? LOG_DIR : CACHE_DIR) . 'captchalog.txt');
             }
         }
-        $comment = $vars['comment'];
-        $vars    = $vars['vars'];
+        // Memorize the originally called plugin saved by get_captcha_form (v2.1.0)
+        $orig_cmd = isset($vars['akismet_orig_cmd']) ? $vars['akismet_orig_cmd'] : '';
+        // v2.1.0: direct access or a broken POST may lack these structures
+        $comment = (isset($vars['comment']) && is_array($vars['comment'])) ? $vars['comment'] : array();
+        $vars    = (isset($vars['vars']) && is_array($vars['vars'])) ? $vars['vars'] : array();
         if ($captcha_valid) {
-            if (PLUGIN_AKISMET_RECAPTCHA_LOG) PluginAkismet::spamlog_write($vars, array('body'=>'break'), LOG_DIR . 'captchalog.txt');
+            if (PLUGIN_AKISMET_RECAPTCHA_LOG) PluginAkismet::spamlog_write($vars, array('body'=>'break'), (defined('LOG_DIR') ? LOG_DIR : CACHE_DIR) . 'captchalog.txt');
 
             // Memorize the user is human because he could pass captcha
             $use_authlevel = PLUGIN_AKISMET_THROUGH_IF_ENROLLEE ? ROLE_AUTH :
@@ -224,15 +258,21 @@ class PluginAkismet
             if (PLUGIN_AKISMET_AUTOPOST_AFTER_SUBMITHAM) {
                 // throw to originally called plugin
                 // refer lib/pukiwiki.php
-                $cmd = isset($vars['cmd']) ? $vars['cmd'] : (isset($vars['plugin']) ? $vars['plugin'] : 'read');
-                if (exist_plugin_action($cmd)) {
+                // v2.1.0: prefer the cmd saved before showing the captcha form.
+                // Never fall back to 'read': it silently discards the posted content.
+                $cmd = $orig_cmd !== '' ? $orig_cmd :
+                    (isset($vars['cmd']) ? $vars['cmd'] : (isset($vars['plugin']) ? $vars['plugin'] : ''));
+                if (($cmd === '' || $cmd === 'read') && isset($vars['msg']) && isset($vars['page'])) {
+                    $cmd = 'edit'; // edit posts may lack cmd/plugin in saved vars
+                }
+                if ($cmd !== '' && $cmd !== 'read' && exist_plugin_action($cmd)) {
                     $post = $vars;
                     $get = array();
                     do_plugin_init($cmd);
                     return do_plugin_action($cmd);
                 } else {
-                    $msg = 'plugin=' . htmlspecialchars($cmd) . ' is not implemented.';
-                    return array('msg'=>$msg,'body'=>$msg);
+                    // could not determine the original plugin: never lose the input
+                    return array('msg'=>'キャプチャ認証', 'body'=>PluginAkismet::recover_form($vars));
                 }
             } else {
                 $body = '<p>スパム取り消し報告を行いました。以下がスパムと判断された投稿内容です。再度投稿してください。</p>' . "\n";
@@ -301,7 +341,7 @@ class PluginAkismet
         // Initialize $comment
         if (! isset($comment)) {
             // special case (now only supports edit plugin)
-            if ($vars['cmd'] === 'edit' || $vars['plugin'] === 'edit') {
+            if ((isset($vars['cmd']) && $vars['cmd'] === 'edit') || (isset($vars['plugin']) && $vars['plugin'] === 'edit')) {
                 $body = $vars['msg'];
             } else {
                 $body = implode("\n", $vars);
@@ -326,12 +366,16 @@ class PluginAkismet
             $akismet = new Akismet(get_script_uri(), PLUGIN_AKISMET_API_KEY, $comment);
             // test for errors
             if($akismet->errorsExist()) { // returns TRUE if any errors exist
-                if($akismet->isError('AKISMET_INVALID_KEY')) {
-                    die_message('akismet : APIキーが不正です.');
-                } elseif($akismet->isError('AKISMET_RESPONSE_FAILED')) {
-                    //die_message('akismet : レスポンスの取得に失敗しました');
-                } elseif($akismet->isError('AKISMET_SERVER_NOT_FOUND')) {
+                // v2.1.0: compare with the integer constants (string keys never matched).
+                // Check connection errors first: when akismet.com is unreachable,
+                // _isValidApiKey also raises AKISMET_INVALID_KEY, but that must not
+                // block postings (through if akismet.com is not available).
+                if($akismet->isError(AKISMET_SERVER_NOT_FOUND)) {
                     //die_message('akismet : サーバへの接続に失敗しました.');
+                } elseif($akismet->isError(AKISMET_RESPONSE_FAILED)) {
+                    //die_message('akismet : レスポンスの取得に失敗しました');
+                } elseif($akismet->isError(AKISMET_INVALID_KEY)) {
+                    die_message('akismet : APIキーが不正です.');
                 }
                 $is_spam = FALSE; // through if akismet.com is not available.
             } else {
@@ -344,7 +388,7 @@ class PluginAkismet
             }
         }
         if ($is_spam) {
-            if (PLUGIN_AKISMET_RECAPTCHA_LOG) PluginAkismet::spamlog_write($vars, array('body'=>'hit'), LOG_DIR . 'captchalog.txt');
+            if (PLUGIN_AKISMET_RECAPTCHA_LOG) PluginAkismet::spamlog_write($vars, array('body'=>'hit'), (defined('LOG_DIR') ? LOG_DIR : CACHE_DIR) . 'captchalog.txt');
             $form = PluginAkismet::get_captcha_form($vars, $comment);
             // die_message('</strong>' . $form . '<strong>');
             $title = $page = 'キャプチャ認証';
@@ -377,6 +421,9 @@ class PluginAkismet
         foreach ($vars as $key => $val) {
             $form .= ' <input type="hidden" name="vars[' . htmlspecialchars($key) . ']" value="' . htmlspecialchars($val) . '" />' . "\n";
         }
+        // v2.1.0: save the originally called plugin so that autopost never loses it
+        $orig_cmd = isset($vars['cmd']) ? $vars['cmd'] : (isset($vars['plugin']) ? $vars['plugin'] : '');
+        $form .= ' <input type="hidden" name="akismet_orig_cmd" value="' . htmlspecialchars($orig_cmd) . '" />' . "\n";
         $form .= ' <input type="hidden" name="cmd" value="akismet">' . "\n";
         $form .= ' <input type="submit" name="submitHam" value="GO" /><br />' . "\n";
         $form .= '</div>' . "\n";
@@ -385,19 +432,43 @@ class PluginAkismet
     }
 
     // static
+    // v2.1.0: present all the posted input as a re-submittable form
+    // so that the user's writing is never lost even if autopost fails
+    static function recover_form($vars)
+    {
+        $form = '<p>認証は完了しましたが、投稿先の自動特定に失敗したため自動投稿できませんでした。お手数ですが、下の「再投稿」ボタンを押して投稿を完了してください。</p>' . "\n";
+        $form .= '<form action="' . get_script_uri() . '" method="post">' . "\n";
+        $form .= '<div>' . "\n";
+        foreach ($vars as $key => $val) {
+            if ($key === 'msg') continue;
+            $form .= ' <input type="hidden" name="' . htmlspecialchars($key) . '" value="' . htmlspecialchars($val) . '" />' . "\n";
+        }
+        if (isset($vars['msg'])) {
+            $form .= ' <textarea name="msg" rows="10" cols="80">' . htmlspecialchars($vars['msg']) . '</textarea><br />' . "\n";
+        }
+        $form .= ' <input type="submit" value="再投稿" />' . "\n";
+        $form .= '</div>' . "\n";
+        $form .= '</form>' . "\n";
+        return $form;
+    }
+
+    // static
     static function spamlog_write($vars, $comment = array(), $filename = '')
     {
+        global $defaultpage;
         if ($filename === '') $filename = PLUGIN_AKISMET_SPAMLOG_FILENAME;
 
         $page = isset($vars['refer']) ? $vars['refer'] :
-            (isset($vars['page']) ? $vars['page'] : $defaultpage);
+            (isset($vars['page']) ? $vars['page'] : (isset($defaultpage) ? $defaultpage : ''));
         $cmd  = isset($vars['cmd']) ? $vars['cmd'] : '';
 
         // logdata format
         $logdata = array();
-        $logdata['time']  = strftime('%y/%m/%d %H:%M:%S');
+        $logdata['time']  = date('y/m/d H:i:s');
         $logdata['ip']    = $_SERVER['REMOTE_ADDR'];
-        $logdata['host']  = isset($_SERVER['REMOTE_HOST']) ? $_SERVER['REMOTE_HOST'] : gethostbyaddr($_SERVER['REMOTE_ADDR']);
+        // v2.1.0: reverse DNS lookup is opt-in (gethostbyaddr can stall under spam flood)
+        $logdata['host']  = isset($_SERVER['REMOTE_HOST']) ? $_SERVER['REMOTE_HOST'] :
+            (PLUGIN_AKISMET_LOG_REVERSE_DNS ? gethostbyaddr($_SERVER['REMOTE_ADDR']) : $_SERVER['REMOTE_ADDR']);
         $logdata['agent'] = $_SERVER['HTTP_USER_AGENT'];
         $logdata['page']  = $page;
         $logdata['cmd']   = $cmd;
@@ -439,7 +510,7 @@ if (! function_exists('is_human')) {
     {
         if (! $is_human) {
             if ($use_session) {
-                session_start();
+                if (session_status() === PHP_SESSION_NONE) session_start();
                 $is_human = isset($_SESSION['pkwk_is_human']) && $_SESSION['pkwk_is_human'];
             }
         }
@@ -459,7 +530,7 @@ if (! function_exists('is_human')) {
             }
         }
         if ($use_session) {
-            session_start();
+            if (session_status() === PHP_SESSION_NONE) session_start();
             $_SESSION['pkwk_is_human'] = $is_human;
         } else {
             global $vars;
@@ -484,7 +555,7 @@ if (! function_exists('is_admin')) {
         $is_admin = FALSE;
         if (! $is_admin) {
             if ($use_session) {
-                session_start();
+                if (session_status() === PHP_SESSION_NONE) session_start();
                 $is_admin = isset($_SESSION['pkwk_is_admin']) && $_SESSION['pkwk_is_admin'];
             }
         }
@@ -506,7 +577,7 @@ if (! function_exists('is_admin')) {
             }
         }
         if ($use_session) {
-            session_start();
+            if (session_status() === PHP_SESSION_NONE) session_start();
             if ($is_admin) $_SESSION['pkwk_is_admin'] = TRUE;
         } else {
             global $vars;
@@ -894,11 +965,15 @@ function recaptcha_mailhide_html($pubkey, $privkey, $email) {
 
 
 // Error constants
-define("AKISMET_SERVER_NOT_FOUND",    0);
-define("AKISMET_RESPONSE_FAILED",    1);
-define("AKISMET_INVALID_KEY",        2);
+// v2.1.0: guarded so that akismet.inc.php and akismet2.inc.php can coexist
+if (! defined("AKISMET_SERVER_NOT_FOUND")) define("AKISMET_SERVER_NOT_FOUND",    0);
+if (! defined("AKISMET_RESPONSE_FAILED"))  define("AKISMET_RESPONSE_FAILED",    1);
+if (! defined("AKISMET_INVALID_KEY"))      define("AKISMET_INVALID_KEY",        2);
 
 
+
+// Guard for coexistence with akismet2.inc.php which declares the same classes
+if (! class_exists('AkismetObject')) {
 
 // Base class to assist in error handling between Akismet classes
 class AkismetObject {
@@ -982,7 +1057,8 @@ class AkismetHttpClient extends AkismetObject {
     
     
     // Constructor
-    function __construct($host, $blogUrl, $apiKey, $port = 80) {
+    // v2.1.0: Akismet API is now called over HTTPS (port 443) by default
+    function __construct($host, $blogUrl, $apiKey, $port = 443) {
         $this->host = $host;
         $this->port = $port;
         $this->blogUrl = $blogUrl;
@@ -994,10 +1070,12 @@ class AkismetHttpClient extends AkismetObject {
     function getResponse($request, $path, $type = "post", $responseLength = 1160) {
         $this->_connect();
         
-        if($this->con && !$this->isError('SERVER_NOT_FOUND')) {
-            $request  = 
+        if($this->con && !$this->isError(AKISMET_SERVER_NOT_FOUND)) {
+            // v2.1.0: current Akismet docs POST to rest.akismet.com directly
+            // (the api_key is sent in the POST body, not as a Host prefix)
+            $request  =
                 strToUpper($type)." /{$this->akismetVersion}/$path HTTP/1.0\r\n" .
-                "Host: ".((!empty($this->apiKey)) ? $this->apiKey."." : null)."{$this->host}\r\n" .
+                "Host: {$this->host}\r\n" .
                 "Content-Type: application/x-www-form-urlencoded; charset=utf-8\r\n" .
                 "Content-Length: ".strlen($request)."\r\n" .
                 "User-Agent: Akismet PHP4 Class\r\n" .
@@ -1024,15 +1102,17 @@ class AkismetHttpClient extends AkismetObject {
     
     // Connect to the Akismet server and store that connection in the instance variable $con
     function _connect() {
-        if(!($this->con = @fsockopen($this->host, $this->port))) {
+        $host = ($this->port == 443 ? 'ssl://' : '') . $this->host;
+        if(!($this->con = @fsockopen($host, $this->port))) {
             $this->setError(AKISMET_SERVER_NOT_FOUND, "Could not connect to akismet server.");
         }
     }
     
     
     // Close the connection to the Akismet server
+    // v2.1.0: fclose(false) raises TypeError on PHP 8 when the connection failed
     function _disconnect() {
-        @fclose($this->con);
+        if (is_resource($this->con)) fclose($this->con);
     }
     
     
@@ -1045,7 +1125,7 @@ class AkismetHttpClient extends AkismetObject {
 // The controlling class. This is the ONLY class the user should instantiate in
 // order to use the Akismet service!
 class Akismet extends AkismetObject {
-    var $apiPort = 80;
+    var $apiPort = 443;
     var $akismetServer = 'rest.akismet.com';
     var $akismetVersion = '1.1';
     var $http;
@@ -1108,6 +1188,12 @@ class Akismet extends AkismetObject {
         if(!$this->_isValidApiKey($apiKey)) {
             $this->setError(AKISMET_INVALID_KEY, "Your Akismet API key is not valid.");
         }
+        // v2.1.0: connection errors raised during the key check live on the
+        // http client; copy them (preserving keys) so callers can distinguish
+        // a server outage from a genuinely invalid key
+        if($this->http->errorsExist()) {
+            $this->errors = $this->errors + $this->http->getErrors();
+        }
     }
     
     
@@ -1151,8 +1237,9 @@ class Akismet extends AkismetObject {
      * @return    boolean
      */
     function _isValidApiKey($key) {
-        $keyCheck = $this->http->getResponse("key=".$this->apiKey."&blog=".$this->blogUrl, 'verify-key');
-            
+        // v2.1.0: current Akismet docs use api_key= (was key=)
+        $keyCheck = $this->http->getResponse("api_key=".urlencode($this->apiKey)."&blog=".urlencode($this->blogUrl), 'verify-key');
+
         return ($keyCheck == "valid");
     }
     
@@ -1198,15 +1285,21 @@ class Akismet extends AkismetObject {
             }
         }
 
-        $query_string = '';
+        // v2.1.0: current Akismet docs require api_key in the POST body
+        $query_string = 'api_key=' . urlencode($this->apiKey) . '&';
 
         foreach($this->comment as $key => $data) {
+            // v2.1.0: $_SERVER may contain array values (e.g. argv);
+            // stripslashes(array) is fatal on PHP 8
+            if (! is_string($data) && ! is_numeric($data)) continue;
             $query_string .= $key . '=' . urlencode(stripslashes($data)) . '&';
         }
 
         return $query_string;
     }
-    
-    
+
+
 }
+
+} // end of class_exists('AkismetObject') guard
 ?>
